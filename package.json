@@ -1,0 +1,30 @@
+{
+  "name": "superbridge-auto-bot",
+  "version": "1.0.0",
+  "description": "Automated bridging bot for Superbridge with random amounts and scheduling",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js",
+    "dev": "node main.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "superbridge",
+    "bridge",
+    "crypto",
+    "automation",
+    "bot",
+    "ethereum",
+    "arbitrum",
+    "defi"
+  ],
+  "author": "si hitam",
+  "license": "MIT",
+  "dependencies": {
+    "puppeteer": "^21.0.0",
+    "dotenv": "^16.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
