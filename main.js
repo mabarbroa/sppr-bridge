@@ -1,6 +1,7 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs');
 const path = require('path');
+const readline = require('readline');
 require('dotenv').config();
 
 class SuperbridgeBot {
@@ -12,6 +13,8 @@ class SuperbridgeBot {
             token: process.env.TOKEN || config.token || 'ETH',
             minAmount: parseFloat(process.env.MIN_AMOUNT) || config.minAmount || 0.01,
             maxAmount: parseFloat(process.env.MAX_AMOUNT) || config.maxAmount || 0.02,
+            customAmount: config.customAmount || null,
+            useRandomAmount: config.useRandomAmount !== undefined ? config.useRandomAmount : true,
             delay: parseInt(process.env.DELAY) || config.delay || 3600000,
             retryDelay: parseInt(process.env.RETRY_DELAY) || config.retryDelay || 300000,
             maxRetries: parseInt(process.env.MAX_RETRIES) || config.maxRetries || 3,
@@ -196,10 +199,23 @@ class SuperbridgeBot {
         return Math.round(randomAmount * 1000000) / 1000000;
     }
 
+    getAmountToUse() {
+        if (this.config.useRandomAmount) {
+            return this.generateRandomAmount();
+        } else {
+            return this.config.customAmount;
+        }
+    }
+
     async enterAmount() {
         try {
-            const amount = this.generateRandomAmount();
-            this.log(`Entering random amount: ${amount} (range: ${this.config.minAmount}-${this.config.maxAmount})`);
+            const amount = this.getAmountToUse();
+            
+            if (this.config.useRandomAmount) {
+                this.log(`Entering random amount: ${amount} (range: ${this.config.minAmount}-${this.config.maxAmount})`);
+            } else {
+                this.log(`Entering custom amount: ${amount}`);
+            }
             
             // Find amount input
             const amountInput = await this.page.$('input[data-testid="amount"], input[placeholder*="Amount"], input[type="number"]');
@@ -282,7 +298,13 @@ class SuperbridgeBot {
             this.log('='.repeat(50));
             this.log('🌉 Starting new bridge cycle...');
             this.log(`⚙️  Configuration: ${this.config.fromChain} → ${this.config.toChain} (${this.config.token})`);
-            this.log(`💰 Random Amount Range: ${this.config.minAmount} - ${this.config.maxAmount}`);
+            
+            if (this.config.useRandomAmount) {
+                this.log(`💰 Random Amount Range: ${this.config.minAmount} - ${this.config.maxAmount}`);
+            } else {
+                this.log(`💰 Fixed Amount: ${this.config.customAmount}`);
+            }
+            
             this.log('='.repeat(50));
             
             const steps = [
@@ -362,40 +384,144 @@ class SuperbridgeBot {
     }
 }
 
-// Default configuration (can be overridden by environment variables)
-const defaultConfig = {
-    headless: true,
-    fromChain: 'Ethereum',
-    toChain: 'Arbitrum', 
-    token: 'ETH',
-    minAmount: 0.01,
-    maxAmount: 0.02,
-    delay: 3600000, // 1 hour
-    retryDelay: 300000, // 5 minutes
-    maxRetries: 3,
-};
+// Interactive setup function
+async function setupAmountConfiguration() {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+
+    const question = (prompt) => {
+        return new Promise((resolve) => {
+            rl.question(prompt, resolve);
+        });
+    };
+
+    console.log('\n' + '='.repeat(60));
+    console.log('🚀 SUPERBRIDGE AUTO BOT - AMOUNT CONFIGURATION');
+    console.log('='.repeat(60));
+
+    console.log('\n💰 Choose amount option:');
+    console.log('1. Random amount between 0.01 - 0.02 ETH (Default)');
+    console.log('2. Custom fixed amount');
+    console.log('3. Custom random range');
+
+    const choice = await question('\nEnter your choice (1/2/3): ');
+    
+    let config = {
+        useRandomAmount: true,
+        minAmount: 0.01,
+        maxAmount: 0.02,
+        customAmount: null
+    };
+
+    switch (choice.trim()) {
+        case '1':
+            console.log('✅ Selected: Random amount (0.01 - 0.02 ETH)');
+            break;
+            
+        case '2':
+            config.useRandomAmount = false;
+            const customAmount = await question('Enter fixed amount (e.g., 0.015): ');
+            config.customAmount = parseFloat(customAmount);
+            
+            if (isNaN(config.customAmount) || config.customAmount <= 0) {
+                console.log('❌ Invalid amount. Using default random range.');
+                config.useRandomAmount = true;
+                config.customAmount = null;
+            } else {
+                console.log(`✅ Selected: Fixed amount (${config.customAmount} ETH)`);
+            }
+            break;
+            
+        case '3':
+            const minAmount = await question('Enter minimum amount (e.g., 0.005): ');
+            const maxAmount = await question('Enter maximum amount (e.g., 0.05): ');
+            
+            const min = parseFloat(minAmount);
+            const max = parseFloat(maxAmount);
+            
+            if (isNaN(min) || isNaN(max) || min <= 0 || max <= min) {
+                console.log('❌ Invalid range. Using default random range.');
+            } else {
+                config.minAmount = min;
+                config.maxAmount = max;
+                console.log(`✅ Selected: Custom random range (${min} - ${max} ETH)`);
+            }
+            break;
+            
+        default:
+            console.log('✅ Using default: Random amount (0.01 - 0.02 ETH)');
+    }
+
+    // Ask for other configurations
+    console.log('\n⚙️  Additional Configuration (press Enter for defaults):');
+    
+    const fromChain = await question('From Chain (default: Ethereum): ');
+    const toChain = await question('To Chain (default: Arbitrum): ');
+    const token = await question('Token (default: ETH): ');
+    const delayMinutes = await question('Delay between bridges in minutes (default: 60): ');
+
+    config.fromChain = fromChain.trim() || 'Ethereum';
+    config.toChain = toChain.trim() || 'Arbitrum';
+    config.token = token.trim() || 'ETH';
+    config.delay = (parseInt(delayMinutes) || 60) * 60 * 1000;
+
+    rl.close();
+    
+    console.log('\n' + '='.repeat(60));
+    console.log('📋 FINAL CONFIGURATION:');
+    console.log('='.repeat(60));
+    console.log(`🔗 Route: ${config.fromChain} → ${config.toChain}`);
+    console.log(`🪙 Token: ${config.token}`);
+    
+    if (config.useRandomAmount) {
+        console.log(`💰 Amount: Random (${config.minAmount} - ${config.maxAmount} ETH)`);
+    } else {
+        console.log(`💰 Amount: Fixed (${config.customAmount} ETH)`);
+    }
+    
+    console.log(`⏰ Delay: ${config.delay / 60000} minutes`);
+    console.log('='.repeat(60));
+
+    return config;
+}
 
 // Main execution
 async function main() {
-    console.log('🚀 Starting Superbridge Auto Bot...');
-    console.log('📊 Random Amount Range: 0.01 - 0.02 ETH');
-    
-    const bot = new SuperbridgeBot(defaultConfig);
-    
-    // Handle graceful shutdown
-    process.on('SIGINT', async () => {
-        console.log('\nReceived SIGINT. Shutting down gracefully...');
-        await bot.stopBot();
-        process.exit(0);
-    });
-    
-    process.on('SIGTERM', async () => {
-        console.log('\nReceived SIGTERM. Shutting down gracefully...');
-        await bot.stopBot();
-        process.exit(0);
-    });
-    
-    await bot.startBot();
+    try {
+        // Setup amount configuration interactively
+        const amountConfig = await setupAmountConfiguration();
+        
+        // Merge with default configuration
+        const finalConfig = {
+            headless: true,
+            retryDelay: 300000, // 5 minutes
+            maxRetries: 3,
+            ...amountConfig
+        };
+        
+        console.log('\n🚀 Starting Superbridge Auto Bot...');
+        
+        const bot = new SuperbridgeBot(finalConfig);
+        
+        // Handle graceful shutdown
+        process.on('SIGINT', async () => {
+            console.log('\nReceived SIGINT. Shutting down gracefully...');
+            await bot.stopBot();
+            process.exit(0);
+        });
+        
+        process.on('SIGTERM', async () => {
+            console.log('\nReceived SIGTERM. Shutting down gracefully...');
+            await bot.stopBot();
+            process.exit(0);
+        });
+        
+        await bot.startBot();
+    } catch (error) {
+        console.error('Error in main execution:', error);
+    }
 }
 
 // Export for use as module
